@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
     # ---- health (public, minimal) --------------------------------------------
-    @app.get("/health")
+    @app.api_route("/health", methods=["GET", "HEAD"])
     def health():
         try:
             ok = db.ping()
@@ -141,13 +141,14 @@ def create_app() -> FastAPI:
         return system.info()
 
     # ---- pages ------------------------------------------------------------------
-    @app.get("/", include_in_schema=False)
+    # HEAD too: uptime monitors and `curl -I` use it (FastAPI's GET routes don't answer HEAD).
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     def index(request: Request):
         if not auth.session_from_request(request):
             return RedirectResponse("/login", status_code=303)
         return FileResponse(STATIC_DIR / "index.html")
 
-    @app.get("/login", include_in_schema=False)
+    @app.api_route("/login", methods=["GET", "HEAD"], include_in_schema=False)
     def login_page(request: Request):
         if auth.session_from_request(request):
             return RedirectResponse("/", status_code=303)
