@@ -33,3 +33,15 @@ cloudtasks-cloud-init.yaml
 Thumbs.db
 .vscode/
 .idea/
+
+# Browser profiles / session data (the portal profile lives in the user folder, never here)
+.cloudtasks-portal-profile/
+*-profile/
+browser-profile/
+user-data-dir/
+Cookies
+Cookies-journal
+Login Data*
+Local State
+*.har
+storage-state*.json

@@ -25,7 +25,10 @@ Write-Step 'Checking Azure login'
 Assert-LoggedIn
 
 if (Test-ResourceGroup) {
-    throw "Resource group '$($Cfg.ResourceGroup)' already exists. Use start.ps1 / pause.ps1, or destroy.ps1 first."
+    if (-not $PlanOnly) {
+        throw "Resource group '$($Cfg.ResourceGroup)' already exists. Use start.ps1 / pause.ps1, or destroy.ps1 first."
+    }
+    Write-Info "Note: '$($Cfg.ResourceGroup)' already exists (deployed). Showing the plan for reference only."
 }
 
 Write-Step 'Checking the subscription policy (allowed regions)'
