@@ -1,0 +1,39 @@
+#cloud-config
+# First-boot setup for the CloudTasks VM (Ubuntu 24.04). deploy.ps1 fills in the __PLACEHOLDERS__.
+# Installs Docker from Docker's official apt repo, clones the public repo and starts the stack.
+package_update: true
+package_upgrade: false
+packages:
+  - ca-certificates
+  - curl
+  - git
+
+swap:
+  filename: /swapfile
+  size: 1073741824        # 1 GiB swap: headroom for building the image on a 1 GiB VM
+
+write_files:
+  - path: /etc/cloudtasks.env
+    permissions: "0644"
+    content: |
+      # Non-secret metadata shown on the VM status page (from deploy.ps1 / Azure).
+      AZURE_REGION=__REGION__
+      AZURE_VM_SIZE=__VM_SIZE__
+      AZURE_VM_NAME=__VM_NAME__
+      AZURE_PUBLIC_IP=__PUBLIC_IP__
+      APP_VERSION=1.0.0
+
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+  - usermod -aG docker __ADMIN_USER__
+  - git clone --depth 1 __REPO_URL__ /opt/cloudtasks
+  - cp /etc/cloudtasks.env /opt/cloudtasks/.env
+  - echo "DEPLOY_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /opt/cloudtasks/.env
+  - cd /opt/cloudtasks && docker compose up -d --build
+  - echo "CloudTasks deployed" > /var/log/cloudtasks-deployed

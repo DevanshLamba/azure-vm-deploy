@@ -1,0 +1,5 @@
+# Normalise line endings: LF in the repo (the VM is Linux), CRLF only for PowerShell scripts.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.woff2 binary

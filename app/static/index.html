@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CloudTasks</title>
+  <meta name="description" content="A soft little task board running on an Azure Linux VM.">
+  <meta name="theme-color" content="#FBF7F2">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/static/fonts/fredoka.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/nunito.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/theme.js"></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Shared SVG symbols -->
+  <svg width="0" height="0" class="sr-only" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m13.5 6.5 4 4" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12a1.5 1.5 0 0 0 1.5 1.4h5A1.5 1.5 0 0 0 16 19l1-12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 3.5v4M16 3.5v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.8 7.8 0 1 0 10.1 10.1Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-board" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="3.5" width="7.5" height="6" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="15.5" width="7.5" height="5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="11.5" width="7.5" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12L17 12h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3c.6 4.3 2.2 6 6.5 6.6-4.3.6-5.9 2.3-6.5 6.6-.6-4.3-2.2-6-6.5-6.6C9.8 9 11.4 7.3 12 3Z" fill="currentColor"/><path d="M18.5 15c.3 2 1 2.8 3 3.1-2 .3-2.7 1-3 3-.3-2-1-2.7-3-3 2-.3 2.7-1.1 3-3.1Z" fill="currentColor"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m6 12.5 4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#tasks" aria-label="CloudTasks home">
+        <svg class="brand-logo" viewBox="0 0 48 48" aria-hidden="true">
+          <defs>
+            <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#FFC9AE"/><stop offset=".55" stop-color="#F7B4CB"/><stop offset="1" stop-color="#C9B8F5"/>
+            </linearGradient>
+          </defs>
+          <path d="M14 37a9 9 0 0 1-1.3-17.9A12 12 0 0 1 35.6 17 10 10 0 0 1 35 37Z" fill="url(#logo-g)"/>
+          <path d="m18 27 4.2 4.2L31 22.5" fill="none" stroke="#3B3442" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="brand-name">CloudTasks</span>
+      </a>
+
+      <nav class="view-tabs" role="tablist" aria-label="Views">
+        <button class="view-tab" role="tab" id="tab-tasks" aria-controls="view-tasks" aria-selected="true" data-view="tasks">
+          <svg aria-hidden="true"><use href="#i-board"/></svg><span>Tasks</span>
+        </button>
+        <button class="view-tab" role="tab" id="tab-status" aria-controls="view-status" aria-selected="false" data-view="status" tabindex="-1">
+          <svg aria-hidden="true"><use href="#i-pulse"/></svg><span>VM status</span>
+        </button>
+        <span class="view-tab-glider" aria-hidden="true"></span>
+      </nav>
+
+      <button class="icon-btn theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme">
+        <svg class="i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <!-- ======================= TASKS VIEW ======================= -->
+    <section class="view" id="view-tasks" role="tabpanel" aria-labelledby="tab-tasks">
+      <div class="hero">
+        <h1 class="hero-title"><span id="greeting">Hello</span><svg class="hero-art" viewBox="0 0 64 48" aria-hidden="true">
+          <g class="hero-sun"><circle cx="40" cy="16" r="11"/><path d="M40 0v3M40 29v3M24 16h3M53 16h3M28.7 4.7l2.1 2.1M49.2 25.2l2.1 2.1M28.7 27.3l2.1-2.1M49.2 6.8l2.1-2.1" class="hero-rays"/></g>
+          <circle cx="40" cy="16" r="8" class="hero-sun-core"/>
+          <g><path d="M14 44a10 10 0 0 1-.6-20A13 13 0 0 1 38 22a10.5 10.5 0 0 1 1 22Z" class="hero-cloud"/>
+          <circle cx="20" cy="34" r="1.6" fill="currentColor"/><circle cx="30" cy="34" r="1.6" fill="currentColor"/>
+          <path d="M23 37.5q2 2 4 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <ellipse cx="16.5" cy="37.5" rx="2.6" ry="1.5" class="hero-cheek"/><ellipse cx="33.5" cy="37.5" rx="2.6" ry="1.5" class="hero-cheek"/></g>
+        </svg></h1>
+        <p class="hero-sub" id="summary" aria-live="polite">Loading your board…</p>
+      </div>
+
+      <div class="toolbar" role="search">
+        <label class="search-pill">
+          <svg aria-hidden="true"><use href="#i-search"/></svg>
+          <span class="sr-only">Search tasks</span>
+          <input id="search" type="search" placeholder="Search tasks" autocomplete="off" maxlength="120">
+          <kbd class="kbd" aria-hidden="true">/</kbd>
+        </label>
+
+        <div class="chips" role="radiogroup" aria-label="Filter tasks">
+          <button class="chip" role="radio" aria-checked="true" data-filter="all">All <span class="chip-count" data-count="all">0</span></button>
+          <button class="chip" role="radio" aria-checked="false" data-filter="active">Active <span class="chip-count" data-count="active">0</span></button>
+          <button class="chip" role="radio" aria-checked="false" data-filter="done">Done <span class="chip-count" data-count="done">0</span></button>
+        </div>
+
+        <label class="select-pill">
+          <span class="sr-only">Sort tasks</span>
+          <select id="sort">
+            <option value="newest">Newest first</option>
+            <option value="due">Due date</option>
+            <option value="priority">Priority</option>
+            <option value="title">A to Z</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </label>
+
+        <button class="ghost-pill" id="load-samples" type="button">
+          <svg aria-hidden="true"><use href="#i-sparkle"/></svg><span class="long">Load sample tasks</span><span class="short">Samples</span>
+        </button>
+      </div>
+
+      <div class="board" id="board" aria-label="Tasks" aria-busy="true"></div>
+
+      <!-- Empty: no tasks at all -->
+      <div class="state" id="state-empty" hidden>
+        <svg class="state-art" viewBox="0 0 260 190" aria-hidden="true">
+          <ellipse cx="130" cy="172" rx="86" ry="9" class="art-shadow"/>
+          <g class="art-float">
+            <rect x="118" y="58" width="78" height="100" rx="16" class="art-board"/>
+            <rect x="141" y="50" width="32" height="16" rx="8" class="art-clip"/>
+            <circle cx="136" cy="88" r="6" class="art-tick-on"/>
+            <path d="m133 88 2.2 2.2 4-4.4" class="art-tick-mark"/>
+            <rect x="148" y="85" width="34" height="6" rx="3" class="art-line"/>
+            <circle cx="136" cy="110" r="6" class="art-tick-off"/>
+            <rect x="148" y="107" width="28" height="6" rx="3" class="art-line"/>
+            <circle cx="136" cy="132" r="6" class="art-tick-off"/>
+            <rect x="148" y="129" width="22" height="6" rx="3" class="art-line"/>
+          </g>
+          <g class="art-bob">
+            <path d="M58 140a24 24 0 0 1-2-47.9A31 31 0 0 1 115 86a26 26 0 0 1-1 54Z" class="art-cloud"/>
+            <ellipse cx="72" cy="118" rx="3.2" ry="4.2" class="art-eye"/>
+            <ellipse cx="96" cy="118" rx="3.2" ry="4.2" class="art-eye"/>
+            <path d="M78 127q6 6 12 0" class="art-smile"/>
+            <ellipse cx="64" cy="128" rx="6" ry="3.6" class="art-cheek"/>
+            <ellipse cx="104" cy="128" rx="6" ry="3.6" class="art-cheek"/>
+          </g>
+          <path d="M214 40c1 7 3.6 9.8 10.6 10.8-7 1-9.6 3.8-10.6 10.8-1-7-3.6-9.8-10.6-10.8 7-1 9.6-3.8 10.6-10.8Z" class="art-spark-1"/>
+          <path d="M44 42c.7 4.6 2.4 6.4 7 7-4.6.7-6.3 2.5-7 7.1-.7-4.6-2.4-6.4-7-7 4.6-.7 6.3-2.5 7-7.1Z" class="art-spark-2"/>
+          <circle cx="226" cy="120" r="4" class="art-dot-1"/>
+          <circle cx="28" cy="98" r="3" class="art-dot-2"/>
+        </svg>
+        <h2 class="state-title">Your board is all clear</h2>
+        <p class="state-text">Add your first task, or fill the board with a few samples to see how it looks.</p>
+        <div class="state-actions">
+          <button class="btn btn-primary" type="button" data-action="new"><svg aria-hidden="true"><use href="#i-plus"/></svg>New task</button>
+          <button class="btn btn-soft" type="button" data-action="samples"><svg aria-hidden="true"><use href="#i-sparkle"/></svg>Load sample tasks</button>
+        </div>
+      </div>
+
+      <!-- Empty: filter / search has no matches -->
+      <div class="state state-compact" id="state-nomatch" hidden>
+        <svg class="state-art" viewBox="0 0 200 140" aria-hidden="true">
+          <ellipse cx="100" cy="128" rx="60" ry="7" class="art-shadow"/>
+          <g class="art-bob">
+            <circle cx="88" cy="66" r="34" class="art-lens"/>
+            <circle cx="88" cy="66" r="24" class="art-glass"/>
+            <path d="m113 92 22 22" class="art-handle"/>
+            <ellipse cx="80" cy="64" rx="2.6" ry="3.4" class="art-eye"/>
+            <ellipse cx="96" cy="64" rx="2.6" ry="3.4" class="art-eye"/>
+            <path d="M83 76q5-4 10 0" class="art-smile"/>
+          </g>
+          <path d="M156 28c.8 5 2.7 7 7.6 7.7-4.9.7-6.8 2.7-7.6 7.7-.8-5-2.7-7-7.6-7.7 4.9-.7 6.8-2.7 7.6-7.7Z" class="art-spark-1"/>
+        </svg>
+        <h2 class="state-title">Nothing matches</h2>
+        <p class="state-text" id="nomatch-text">Try another word or filter.</p>
+        <div class="state-actions">
+          <button class="btn btn-soft" type="button" data-action="clear-filters">Clear search and filters</button>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div class="state" id="state-error" hidden role="alert">
+        <svg class="state-art" viewBox="0 0 220 170" aria-hidden="true">
+          <ellipse cx="110" cy="156" rx="70" ry="8" class="art-shadow"/>
+          <g class="art-bob">
+            <path d="M70 104a24 24 0 0 1-2-47.9A31 31 0 0 1 127 50a26 26 0 0 1-1 54Z" class="art-cloud-sad"/>
+            <path d="M83 80q3-3 6 0M107 80q3-3 6 0" class="art-smile"/>
+            <path d="M90 94q8-6 16 0" class="art-smile"/>
+          </g>
+          <path d="M80 118q-4 8 0 12a4 4 0 0 0 0-12Z" class="art-drop"/>
+          <path d="M106 124q-4 8 0 12a4 4 0 0 0 0-12Z" class="art-drop"/>
+          <path d="M132 116q-4 8 0 12a4 4 0 0 0 0-12Z" class="art-drop"/>
+        </svg>
+        <h2 class="state-title">We couldn't reach your board</h2>
+        <p class="state-text" id="error-text">The server didn't answer. It might be restarting.</p>
+        <div class="state-actions">
+          <button class="btn btn-primary" type="button" data-action="retry"><svg aria-hidden="true"><use href="#i-retry"/></svg>Try again</button>
+        </div>
+      </div>
+
+      <p class="hint" aria-hidden="true"><kbd class="kbd">N</kbd> new task <span class="hint-dot"></span> <kbd class="kbd">/</kbd> search <span class="hint-dot"></span> <kbd class="kbd">Esc</kbd> close</p>
+    </section>
+
+    <!-- ======================= STATUS VIEW ======================= -->
+    <section class="view" id="view-status" role="tabpanel" aria-labelledby="tab-status" hidden>
+      <div class="hero hero-status">
+        <div>
+          <h1 class="hero-title">VM status</h1>
+          <p class="hero-sub" id="status-sub">Connecting to the server…</p>
+        </div>
+        <span class="live-pill" id="live-pill" data-state="connecting"><span class="live-dot"></span><span id="live-text">Connecting</span></span>
+      </div>
+
+      <div class="board tiles" id="tiles" aria-busy="true">
+        <!-- CPU -->
+        <article class="tile" data-color="peach" data-tile="cpu" aria-labelledby="t-cpu">
+          <header class="tile-head"><h2 id="t-cpu">CPU</h2><span class="tile-tag" id="cpu-cores">–</span></header>
+          <div class="gauge" data-gauge="cpu">
+            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="gauge-track" cx="60" cy="60" r="50"/><circle class="gauge-fill" cx="60" cy="60" r="50"/></svg>
+            <div class="gauge-label"><strong id="cpu-val">–</strong><span>used</span></div>
+          </div>
+          <div class="spark" data-spark="cpu" aria-hidden="true"></div>
+          <p class="tile-foot">Last 2 minutes</p>
+        </article>
+
+        <!-- Memory -->
+        <article class="tile" data-color="lavender" data-tile="mem" aria-labelledby="t-mem">
+          <header class="tile-head"><h2 id="t-mem">Memory</h2><span class="tile-tag" id="mem-total">–</span></header>
+          <div class="gauge" data-gauge="mem">
+            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="gauge-track" cx="60" cy="60" r="50"/><circle class="gauge-fill" cx="60" cy="60" r="50"/></svg>
+            <div class="gauge-label"><strong id="mem-val">–</strong><span>used</span></div>
+          </div>
+          <div class="spark" data-spark="mem" aria-hidden="true"></div>
+          <p class="tile-foot" id="mem-detail">–</p>
+        </article>
+
+        <!-- Health -->
+        <article class="tile" data-color="mint" data-tile="health" aria-labelledby="t-health">
+          <header class="tile-head"><h2 id="t-health">Health</h2><span class="tile-tag">/health</span></header>
+          <div class="health-row">
+            <span class="health-orb" id="health-orb" data-state="unknown"></span>
+            <div><p class="big-value" id="health-val">Checking</p><p class="tile-foot" id="health-detail">–</p></div>
+          </div>
+          <div class="spark" data-spark="latency" aria-hidden="true"></div>
+          <p class="tile-foot">Response time</p>
+        </article>
+
+        <!-- Region -->
+        <article class="tile" data-color="sky" data-tile="region" aria-labelledby="t-region">
+          <header class="tile-head"><h2 id="t-region">Region</h2><span class="tile-tag" id="vm-size">–</span></header>
+          <svg class="globe" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="44" class="globe-body"/>
+            <path d="M16 60h88M60 16c-14 14-14 74 0 88M60 16c14 14 14 74 0 88M24 38h72M24 82h72" class="globe-lines"/>
+            <path d="M60 34c-8 0-14 6-14 14 0 10 14 24 14 24s14-14 14-24c0-8-6-14-14-14Z" class="globe-pin"/>
+            <circle cx="60" cy="48" r="5" class="globe-pin-dot"/>
+          </svg>
+          <p class="big-value" id="region-val">–</p>
+          <p class="tile-foot" id="region-detail">–</p>
+        </article>
+
+        <!-- Disk -->
+        <article class="tile" data-color="mint" data-tile="disk" aria-labelledby="t-disk">
+          <header class="tile-head"><h2 id="t-disk">Disk</h2><span class="tile-tag" id="disk-total">–</span></header>
+          <div class="gauge gauge-sm" data-gauge="disk">
+            <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="gauge-track" cx="60" cy="60" r="50"/><circle class="gauge-fill" cx="60" cy="60" r="50"/></svg>
+            <div class="gauge-label"><strong id="disk-val">–</strong><span>full</span></div>
+          </div>
+          <p class="tile-foot" id="disk-detail">–</p>
+        </article>
+
+        <!-- Public IP -->
+        <article class="tile" data-color="blush" data-tile="ip" aria-labelledby="t-ip">
+          <header class="tile-head"><h2 id="t-ip">Public IP</h2></header>
+          <div class="ip-row">
+            <p class="big-value mono" id="ip-val">–</p>
+            <button class="icon-btn icon-btn-sm" id="ip-copy" type="button" aria-label="Copy public IP" hidden><svg aria-hidden="true"><use href="#i-copy"/></svg></button>
+          </div>
+          <p class="tile-foot" id="ip-detail">–</p>
+        </article>
+
+        <!-- Uptime -->
+        <article class="tile" data-color="butter" data-tile="uptime" aria-labelledby="t-uptime">
+          <header class="tile-head"><h2 id="t-uptime">Uptime</h2></header>
+          <p class="big-value big-value-xl" id="uptime-val">–</p>
+          <p class="tile-foot" id="uptime-detail">–</p>
+        </article>
+
+        <!-- Load -->
+        <article class="tile" data-color="sky" data-tile="load" aria-labelledby="t-load">
+          <header class="tile-head"><h2 id="t-load">Load average</h2><span class="tile-tag">1 · 5 · 15 min</span></header>
+          <div class="load-row">
+            <div><strong id="load-1">–</strong><span>1 min</span></div>
+            <div><strong id="load-5">–</strong><span>5 min</span></div>
+            <div><strong id="load-15">–</strong><span>15 min</span></div>
+          </div>
+          <div class="spark" data-spark="load" aria-hidden="true"></div>
+        </article>
+
+        <!-- Host details -->
+        <article class="tile" data-color="peach" data-tile="host" aria-labelledby="t-host">
+          <header class="tile-head"><h2 id="t-host">Host</h2><span class="tile-tag" id="app-version">–</span></header>
+          <dl class="kv" id="host-kv"></dl>
+        </article>
+      </div>
+      <p class="hint" aria-hidden="true">Updates every 2.5 seconds while this tab is open.</p>
+    </section>
+  </main>
+
+  <button class="fab" id="fab" type="button" aria-label="New task (N)" title="New task (N)">
+    <svg aria-hidden="true"><use href="#i-plus"/></svg>
+  </button>
+
+  <!-- ======================= COMPOSER ======================= -->
+  <dialog class="composer" id="composer" aria-labelledby="composer-title">
+    <form id="composer-form" novalidate>
+      <div class="composer-head">
+        <h2 id="composer-title">New task</h2>
+        <button class="icon-btn icon-btn-sm" type="button" data-action="close" aria-label="Close">
+          <svg aria-hidden="true"><use href="#i-plus" class="rot45"/></svg>
+        </button>
+      </div>
+
+      <div class="field">
+        <label for="f-title" class="sr-only">Title</label>
+        <input id="f-title" name="title" class="title-input" type="text" maxlength="120" placeholder="What needs doing?" autocomplete="off" required aria-describedby="f-title-count">
+        <span class="counter" id="f-title-count" aria-live="off">0 / 120</span>
+      </div>
+
+      <div class="field">
+        <label for="f-note" class="field-label">Note <span class="optional">optional</span></label>
+        <textarea id="f-note" name="note" rows="3" maxlength="500" placeholder="Add a little detail…"></textarea>
+      </div>
+
+      <fieldset class="field">
+        <legend class="field-label">Priority</legend>
+        <div class="seg">
+          <label class="seg-opt"><input type="radio" name="priority" value="low"><span><i class="pdot" data-p="low"></i>Low</span></label>
+          <label class="seg-opt"><input type="radio" name="priority" value="medium" checked><span><i class="pdot" data-p="medium"></i>Medium</span></label>
+          <label class="seg-opt"><input type="radio" name="priority" value="high"><span><i class="pdot" data-p="high"></i>High</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="field-label">Due date</legend>
+        <div class="due-row">
+          <button type="button" class="due-chip" data-due="none" aria-pressed="true">No date</button>
+          <button type="button" class="due-chip" data-due="0" aria-pressed="false">Today</button>
+          <button type="button" class="due-chip" data-due="1" aria-pressed="false">Tomorrow</button>
+          <button type="button" class="due-chip" data-due="7" aria-pressed="false">Next week</button>
+          <label class="due-chip due-picker">
+            <svg aria-hidden="true"><use href="#i-cal"/></svg>
+            <span class="sr-only">Pick a date</span>
+            <input type="date" id="f-due" name="due_date">
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="field-label">Card colour</legend>
+        <div class="swatches">
+          <label class="swatch" data-color="peach"><input type="radio" name="color" value="peach"><span class="sr-only">Peach</span></label>
+          <label class="swatch" data-color="mint"><input type="radio" name="color" value="mint"><span class="sr-only">Mint</span></label>
+          <label class="swatch" data-color="lavender"><input type="radio" name="color" value="lavender"><span class="sr-only">Lavender</span></label>
+          <label class="swatch" data-color="butter"><input type="radio" name="color" value="butter"><span class="sr-only">Butter yellow</span></label>
+          <label class="swatch" data-color="sky"><input type="radio" name="color" value="sky"><span class="sr-only">Sky</span></label>
+          <label class="swatch" data-color="blush"><input type="radio" name="color" value="blush"><span class="sr-only">Blush pink</span></label>
+        </div>
+      </fieldset>
+
+      <p class="form-error" id="form-error" role="alert" hidden></p>
+
+      <div class="composer-foot">
+        <span class="kbd-hint"><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Enter</kbd> to save</span>
+        <button class="btn btn-ghost" type="button" data-action="close">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="composer-submit">Add task</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- ======================= CARD TEMPLATE ======================= -->
+  <template id="card-tpl">
+    <div class="cell">
+      <article class="card">
+        <div class="card-top">
+          <span class="prio"><i class="pdot"></i><span class="prio-text"></span></span>
+          <span class="due" hidden><svg aria-hidden="true"><use href="#i-cal"/></svg><span class="due-text"></span></span>
+        </div>
+        <h3 class="card-title"><span class="card-title-text"></span></h3>
+        <p class="card-note" hidden></p>
+        <div class="card-foot">
+          <button class="check" type="button" role="checkbox" aria-checked="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="check-ring" cx="12" cy="12" r="10"/><path class="check-mark" d="m7.5 12.4 3 3 6-6.6"/></svg>
+          </button>
+          <span class="card-meta"></span>
+          <div class="card-actions">
+            <button class="icon-btn icon-btn-sm" type="button" data-action="edit"><svg aria-hidden="true"><use href="#i-edit"/></svg></button>
+            <button class="icon-btn icon-btn-sm icon-btn-danger" type="button" data-action="delete"><svg aria-hidden="true"><use href="#i-trash"/></svg></button>
+          </div>
+        </div>
+      </article>
+    </div>
+  </template>
+</body>
+</html>
