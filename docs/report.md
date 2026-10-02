@@ -3,6 +3,12 @@
 **Project #16, Cloud Computing.** Application: *CloudTasks*, a task tracker with a live VM status panel.
 Live URL during evaluation: `http://20.205.122.152/` · Code: `https://github.com/devanshlamba/azure-vm-deploy`
 
+> **PENDING (draft status).** Still to be completed before submission:
+> 1. Azure portal screenshots, Section 10.4 (being captured).
+> 2. The paused state: `pause.ps1` output and the portal's *Stopped (deallocated)* view, Section 10.5.
+> 3. The billed cost from Cost Analysis, Section 7 (Azure reports usage 8–24 hours late).
+> 4. Section 9, *What I learned*, rewritten in my own words.
+
 ---
 
 ## 1. Objective
@@ -140,7 +146,7 @@ Pay-as-you-go prices for East Asia, read from the Azure Retail Prices API on 2 O
 
 **Real cost.** The VM was created on 2 October 2026 at 10:04 UTC. By the time this report was written (about 1.5 hours later), the expected charge was about **0.03 USD**: 1.5 h × (0.0116 + 0.005) USD/hour + 1.5 h of disk. Azure shows billed usage 8–24 hours late. The final figure comes from *Cost Management → Cost analysis*, filtered to `rg-cloudtasks`.
 
-> Billed cost for the project period (from the portal): **_____ USD**, for the period **_____ to _____**.
+> **PENDING:** billed cost for the project period, from Cost Management → Cost analysis: **_____ USD**, for the period **_____ to _____**.
 
 All charges come out of the Azure for Students credit; no credit card is linked. With 100 USD of credit, this setup could run nonstop for roughly 200 days.
 
@@ -158,6 +164,8 @@ All charges come out of the Azure for Students credit; no credit card is linked.
 
 ## 9. What I learned
 
+> **PENDING:** the points below are notes drafted from what happened during the build. Rewrite them in your own words before submitting.
+
 - **Student policies shape the architecture.** The region I would have picked first (close to India) wasn't allowed. Of the allowed ones, only East Asia had both auto-shutdown support and VM sizes my subscription could use. Checking `az vm list-skus` restrictions per subscription, not just the region list, saved a failed deployment.
 - **"Stopped" is not "deallocated", and deallocated isn't free.** Only deallocation stops VM billing. Disks and Standard static IPs keep costing money, which is why my paused state still costs 0.199 USD/day.
 - **ARM is a real option for small workloads.** It was the cheapest size available; the only extra work was checking that every image and Python package had an arm64 build.
@@ -167,41 +175,151 @@ All charges come out of the Azure for Students credit; no credit card is linked.
 - **Windows tooling quirks matter for automation.** `az` on Windows runs through `cmd.exe`, which cut a URL at its `&`, and PowerShell 5.1 stripped quotes inside SSH commands. Running the scripts for real, not just writing them, exposed both bugs.
 - **Automation makes the cloud cheap to experiment with.** One command deploys, one pauses, one destroys, and every step is verified from outside the VM.
 
-## 10. Screenshots
+## 10. Evidence
 
-**Taken automatically from the live site** (`docs/screenshots/`):
+All evidence comes from the real deployment on 2 October 2026. Images were checked one by one: no subscription ID, tenant ID, password or home IP address appears in any of them. In terminal output, the deployer's home IP is replaced with `<home-ip-masked>`; nothing else was changed.
 
-| File | Shows |
+### 10.1 Live site with the address bar
+
+Captured from a real Chromium window with the Win32 `PrintWindow` API (`scripts/window_screenshots.py`), so the address bar is included.
+
+![Tasks view in the browser](screenshots/browser-desktop-tasks.png)
+*Figure 1: Tasks view on the live VM, address bar showing `20.205.122.152/#tasks` ("Not secure" because the site is HTTP only, see Section 8).*
+
+![VM status in the browser](screenshots/browser-desktop-status.png)
+*Figure 2: VM status panel (heading scrolled under the top bar)*
+
+![Health endpoint in the browser](screenshots/browser-health.png)
+*Figure 3: The public `/health` endpoint returning `{"status":"ok","database":"ok","version":"1.0.0"}`.*
+
+![Mobile tasks](screenshots/browser-mobile-tasks.png)
+*Figure 4: Mobile layout in a narrow (about 500 px) browser window, the smallest width Chromium allows: one column of cards.*
+
+![Mobile VM status](screenshots/browser-mobile-status.png)
+*Figure 5: VM status in the same narrow window.*
+
+### 10.2 Full-page views (light and dark)
+
+Captured with Playwright from the live site (`scripts/screenshots.py`), with no browser console errors.
+
+![Desktop status, light](screenshots/live-desktop-light-status.png)
+*Figure 6: VM status, light theme: real region (East Asia), VM size (B2pts_v2) and public IP, labelled "Set at deploy time from Azure".*
+
+![Desktop tasks, dark](screenshots/live-desktop-dark-tasks.png)
+*Figure 7: Task board, dark theme: masonry grid, priorities, due-date chips, done tasks with strike-through.*
+
+![Composer](screenshots/live-desktop-light-composer.png)
+*Figure 8: The add-task dialog with priority, due date and card colour.*
+
+| Other captures in `docs/screenshots/` | Shows |
 |---|---|
-| `live-desktop-light-tasks.png`, `live-desktop-dark-tasks.png` | Task board (masonry grid, priorities, due dates, done state) |
-| `live-desktop-light-status.png`, `live-desktop-dark-status.png` | VM status with the real region (East Asia), size, VM name and public IP |
-| `live-mobile-light-tasks.png`, `live-mobile-dark-tasks.png` | Mobile layout |
-| `live-mobile-light-status.png`, `live-mobile-dark-status.png` | Mobile VM status |
+| `live-desktop-light-tasks.png`, `live-desktop-dark-status.png` | The two views in the other theme |
+| `live-mobile-{light,dark}-{tasks,status}.png` | Mobile, both views, both themes |
 | `live-desktop-light-empty.png` | Empty state before the sample tasks were loaded |
-| `live-desktop-light-composer.png`, `live-mobile-light-composer.png` | Add-task dialog and mobile bottom sheet |
+| `live-mobile-light-composer.png` | Add-task bottom sheet on mobile |
 
-**To take yourself.** Before sharing, blur the **Subscription ID**, the **Directory/Tenant ID**, your **email address**, and **your home IP** in the NSG rule. The VM's public IP can stay visible.
+### 10.3 Terminal evidence
 
-From the **Azure portal**:
+*Listing 1: `./scripts/deploy.ps1 -PlanOnly`, run against the existing deployment on 2 October 2026 at 11:38 UTC (home IP masked).*
 
-1. **Resource group `rg-cloudtasks` → Overview**: all 7 resources and the region East Asia.
-2. **Virtual machine `vm-cloudtasks` → Overview**: status *Running*, size *Standard B2pts v2*, OS *Ubuntu 24.04*, location, public IP. The Essentials panel shows the Subscription ID, so blur it.
-3. **VM → Networking → Network settings**: inbound port rules `AllowSshFromMyIp` (22, your IP /32, blur it) and `AllowHttp` (80, Internet), plus the default deny rules.
-4. **VM → Operations → Auto-shutdown**: enabled, time 02:00 IST (the portal may display it as 20:30 UTC).
-5. **VM → Settings → Disks**: OS disk, Standard SSD, 30 GiB.
-6. **Public IP `pip-cloudtasks` → Overview**: SKU Standard, assignment Static, the IP address.
-7. **VM → Monitoring → Metrics**: *Percentage CPU* over the last hour, ideally while the VM status tab is open.
-8. **Subscription → Policies → Compliance (or Assignments)**: the *Allowed resource deployment regions* assignment and its allowed list. Blur the Subscription ID.
-9. **Cost Management → Cost analysis**, scope `rg-cloudtasks`, at least a day after deployment: the actual cost, for Section 7.
-10. **VM → Overview after `pause.ps1`**: status *Stopped (deallocated)*, to show the paused state.
+```text
+==> Checking Azure login
+    OK  Logged in, subscription: Azure for Students
+    Note: 'rg-cloudtasks' already exists (deployed). Showing the plan for reference only.
 
-From the **live site and your terminal**:
+==> Checking the subscription policy (allowed regions)
+    Allowed regions: eastasia, malaysiawest, uaenorth, indonesiacentral, indiasouthcentral
+    OK  eastasia is allowed
 
-11. Browser at `http://20.205.122.152/` with the **address bar visible**, tasks view.
-12. Browser on the **VM status** tab with the address bar visible, showing East Asia and 20.205.122.152.
-13. Browser at `http://20.205.122.152/health`, showing the JSON `{"status":"ok","database":"ok",...}`.
-14. Your **phone** on the live site, showing that it really is public.
-15. Terminal: output of `./scripts/deploy.ps1 -PlanOnly` (plan and cost table). It shows your IP in the NSG line, so blur it.
-16. Terminal: `ssh -i ~/.ssh/cloudtasks_azure_ed25519 azureuser@20.205.122.152` then `sudo docker compose -f /opt/cloudtasks/docker-compose.yml ps` (both containers *healthy*) and `free -m`.
-17. Terminal: `./scripts/pause.ps1` and `./scripts/start.ps1` outputs with their cost lines.
-18. *(Optional, proves the firewall)* An SSH attempt from your phone's hotspot or another network timing out, while `http://20.205.122.152/` still loads from there.
+==> Checking that auto-shutdown works in this region
+    OK  Auto-shutdown is supported in East Asia
+
+==> Checking that Standard_B2pts_v2 is available to this subscription in eastasia
+    OK  Standard_B2pts_v2 is available (no restrictions)
+
+==> Finding your current public IP (for the SSH rule)
+    OK  SSH (22) will be allowed only from <home-ip-masked>/32
+
+==> Fetching live prices (Azure Retail Prices API)
+
+PLANNED RESOURCES  (region: eastasia / East Asia)
+
+Resource        Name                             Details                                                 USD/day
+--------        ----                             -------                                                 -------
+Resource group  rg-cloudtasks                    container for everything below                          0      
+Virtual machine vm-cloudtasks                    Standard_B2pts_v2, Ubuntu 24.04 Arm64, SSH key only     0.278  
+OS disk         vm-cloudtasks-osdisk             StandardSSD_LRS 30 GB (E4)                              0.079  
+Public IP       pip-cloudtasks                   Standard SKU, static IPv4                               0.120  
+NSG             nsg-cloudtasks                   22 from <home-ip-masked>/32, 80 from anywhere, rest denied 0      
+VNet + subnet   vnet-cloudtasks                  10.20.0.0/24, subnet 10.20.0.0/26                       0      
+NIC             vm-cloudtasksVMNic               attached to VM, NSG and public IP                       0      
+Auto-shutdown   shutdown-computevm-vm-cloudtasks 02:00 IST (20:30 UTC) every day                         0      
+
+
+
+State                               USD / day  USD / month
+Running (VM + disk + IP)                0.477        14.51
+Paused / deallocated (disk + IP)        0.199         6.05
+Destroyed (resource group deleted)      0.000         0.00
+
+Prices: VM 0.0116 USD/h, public IP 0.005 USD/h, disk 2.4 USD/month. Billed to your Azure for Students credit (no card).
+Outbound data: first 100 GB/month free. Auto-shutdown deallocates the VM at 02:00 IST, so the VM part stops being billed overnight.
+
+Plan only: nothing was created.
+```
+
+*Listing 2: `sudo docker ps` on the VM over SSH, 2 October 2026, 11:38 UTC.*
+
+```text
+azureuser@vm-cloudtasks:~$ sudo docker ps
+CONTAINER ID   IMAGE                  COMMAND                  CREATED          STATUS                    PORTS                                 NAMES
+09e8cecb6eb1   cloudtasks-app:1.0.0   "uvicorn app.main:ap…"   16 minutes ago   Up 16 minutes (healthy)   8000/tcp                              cloudtasks-app
+d048df130e2f   nginx:1.30-alpine      "/docker-entrypoint.…"   2 hours ago      Up 2 hours (healthy)      0.0.0.0:80->80/tcp, [::]:80->80/tcp   cloudtasks-nginx
+```
+
+*Listing 3: `sudo docker compose ps` in `/opt/cloudtasks` on the VM, 2 October 2026, 11:38 UTC. Both containers healthy; only nginx publishes a port (80); the app's 8000 is internal.*
+
+```text
+azureuser@vm-cloudtasks:/opt/cloudtasks$ sudo docker compose ps
+NAME               IMAGE                  COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+cloudtasks-app     cloudtasks-app:1.0.0   "uvicorn app.main:ap…"   app       16 minutes ago   Up 16 minutes (healthy)   8000/tcp
+cloudtasks-nginx   nginx:1.30-alpine      "/docker-entrypoint.…"   nginx     2 hours ago      Up 2 hours (healthy)      0.0.0.0:80->80/tcp, [::]:80->80/tcp
+```
+
+### 10.4 Azure portal
+
+Captured from the Azure portal in a browser window. Subscription ID, tenant ID, email address and home IP are masked before every capture.
+
+> **PENDING:** screenshot (a): Resource group `rg-cloudtasks` → Overview, showing all 7 resources in East Asia.
+*Figure 9: (a) Resource group `rg-cloudtasks` → Overview.*
+
+> **PENDING:** screenshot (b): Virtual machine `vm-cloudtasks` → Overview, showing status *Running*, size Standard B2pts v2, Ubuntu 24.04, public IP.
+*Figure 10: (b) Virtual machine `vm-cloudtasks` → Overview.*
+
+> **PENDING:** screenshot (c): Network security group `nsg-cloudtasks` → Inbound security rules, showing `AllowSshFromMyIp` (22, home IP masked), `AllowHttp` (80), default deny rules.
+*Figure 11: (c) Network security group `nsg-cloudtasks` → Inbound security rules.*
+
+> **PENDING:** screenshot (d): VM → Operations → Auto-shutdown, showing enabled daily at 02:00 IST.
+*Figure 12: (d) VM → Operations → Auto-shutdown.*
+
+> **PENDING:** screenshot (e): OS disk `vm-cloudtasks-osdisk` → Overview, showing Standard SSD, 30 GiB.
+*Figure 13: (e) OS disk `vm-cloudtasks-osdisk` → Overview.*
+
+> **PENDING:** screenshot (f): Public IP `pip-cloudtasks` → Overview, showing SKU Standard, static, 20.205.122.152.
+*Figure 14: (f) Public IP `pip-cloudtasks` → Overview.*
+
+> **PENDING:** screenshot (g): VM → Monitoring → Metrics, showing *Percentage CPU* chart.
+*Figure 15: (g) VM → Monitoring → Metrics.*
+
+> **PENDING:** screenshot (h): Azure Policy → Assignments, showing *Allowed resource deployment regions* with the five allowed regions.
+*Figure 16: (h) Azure Policy → Assignments.*
+
+> **PENDING:** screenshot (i): Cost Management → Cost analysis (scope `rg-cloudtasks`), showing accumulated cost; may still be empty until Azure reports usage.
+*Figure 17: (i) Cost Management → Cost analysis (scope `rg-cloudtasks`).*
+
+### 10.5 Paused state
+
+> **PENDING:** real output of `./scripts/pause.ps1`, with its cost line.
+
+> **PENDING:** screenshot (j): VM Overview showing status *Stopped (deallocated)*.
+*Figure 18: (j) VM Overview after `pause.ps1`.*
