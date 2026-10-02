@@ -266,3 +266,11 @@ def test_deleting_a_user_removes_their_tasks_and_sessions(app):
         assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
     assert c.get("/api/tasks").status_code == 401
+
+
+def test_head_requests_work_for_monitors(app):
+    c = new_client(app)
+    assert c.head("/health").status_code == 200
+    assert c.head("/login").status_code == 200
+    r = c.head("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
