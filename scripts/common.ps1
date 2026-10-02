@@ -1,8 +1,10 @@
-# Shared settings and helpers for deploy / pause / start / destroy. Dot-sourced, not run directly.
+# Shared settings and helpers for deploy / start / pause / update / status / destroy. Dot-sourced, not run directly.
 # Never prints subscription or tenant IDs: every az call below uses --query to pick only the fields it needs.
 
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandArgumentPassing = 'Legacy' }
+# Windows PowerShell 5.1 does not enable TLS 1.2 by default.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $Cfg = [ordered]@{
     ResourceGroup = 'rg-cloudtasks'
@@ -17,7 +19,8 @@ $Cfg = [ordered]@{
     SubnetName    = 'snet-cloudtasks'
     NsgName       = 'nsg-cloudtasks'
     PublicIpName  = 'pip-cloudtasks'
-    ShutdownUtc   = '2030'                     # 20:30 UTC = 02:00 IST
+    Domain        = 'tasks.devanshlamba.in'    # Cloudflare A record -> the static IP, "DNS only"
+    CreditUsd     = 100                        # Azure for Students credit, for the run-out estimate
     RepoUrl       = 'https://github.com/devanshlamba/azure-vm-deploy.git'
     SshKey        = Join-Path $HOME '.ssh\cloudtasks_azure_ed25519'
 }
@@ -89,6 +92,8 @@ function Show-CostTable($c) {
     "{0,-34} {1,10:N3} {2,12:N2}" -f 'Running (VM + disk + IP)', $c.RunningDay, ($c.RunningDay * 30.4) | Write-Host
     "{0,-34} {1,10:N3} {2,12:N2}" -f 'Paused / deallocated (disk + IP)', $c.PausedDay, ($c.PausedDay * 30.4) | Write-Host
     "{0,-34} {1,10:N3} {2,12:N2}" -f 'Destroyed (resource group deleted)', 0, 0 | Write-Host
+    $days = [math]::Floor($Cfg.CreditUsd / $c.RunningDay)
+    Write-Host ("Running 24/7, {0} USD of credit lasts about {1} days (until about {2:d MMM yyyy})." -f $Cfg.CreditUsd, $days, (Get-Date).AddDays($days))
 }
 
 # Poll an URL from this laptop until it answers 200 (or time runs out).
@@ -106,11 +111,74 @@ function Wait-Http([string]$Url, [int]$TimeoutSec = 900) {
     throw "Timed out waiting for $Url"
 }
 
+function Get-SshArgs {
+    @('-i', $Cfg.SshKey, '-o', 'StrictHostKeyChecking=accept-new', '-o', "UserKnownHostsFile=$HOME/.ssh/known_hosts_cloudtasks")
+}
+
+# Run a command on the VM. Avoid double quotes inside $Command: Windows PowerShell 5.1 strips them.
+function Invoke-Vm([string]$Ip, [string]$Command) {
+    $sshArgs = Get-SshArgs
+    & ssh @sshArgs "$($Cfg.AdminUser)@$Ip" $Command
+    if ($LASTEXITCODE -ne 0) { throw "SSH command failed (exit $LASTEXITCODE)" }
+}
+
+function Resolve-Domain {
+    try { @([Net.Dns]::GetHostAddresses($Cfg.Domain) | Where-Object AddressFamily -eq 'InterNetwork' | ForEach-Object { $_.ToString() }) }
+    catch { @() }
+}
+
+# Status code and Location of one request, without following redirects.
+function Get-HttpStatus([string]$Url) {
+    $req = [Net.HttpWebRequest]::Create($Url)
+    $req.AllowAutoRedirect = $false
+    $req.Timeout = 10000
+    try { $res = $req.GetResponse() }
+    catch [Net.WebException] { $res = $_.Exception.Response; if (-not $res) { throw } }
+    try { [pscustomobject]@{ Code = [int]$res.StatusCode; Location = $res.Headers['Location'] } }
+    finally { $res.Close() }
+}
+
+# The certificate the server presents, and whether Windows considers it valid for the name.
+function Get-CertInfo([string]$HostName) {
+    $script:certPolicyErrors = 'unknown'
+    $tcp = New-Object Net.Sockets.TcpClient
+    $tcp.Connect($HostName, 443)
+    try {
+        $cb = [Net.Security.RemoteCertificateValidationCallback] { param($s, $c, $ch, $e) $script:certPolicyErrors = "$e"; $true }
+        $ssl = New-Object Net.Security.SslStream($tcp.GetStream(), $false, $cb)
+        $ssl.AuthenticateAsClient($HostName)
+        $cert = New-Object Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
+        [pscustomobject]@{
+            Name     = $cert.GetNameInfo('DnsName', $false)
+            Issuer   = $cert.GetNameInfo('SimpleName', $true)
+            NotAfter = $cert.NotAfter
+            DaysLeft = [int][math]::Floor(($cert.NotAfter - (Get-Date)).TotalDays)
+            Valid    = ($script:certPolicyErrors -eq 'None')
+        }
+    } finally { $tcp.Close() }
+}
+
+# Verify the live site from this laptop: valid HTTPS, redirect, login wall, health.
 function Test-Site([string]$Ip) {
-    $home_ = Invoke-WebRequest -Uri "http://$Ip/" -UseBasicParsing -TimeoutSec 10
-    if ($home_.StatusCode -ne 200 -or $home_.Content -notmatch 'CloudTasks') { throw "Home page check failed ($($home_.StatusCode))" }
-    Write-Ok "http://$Ip/ returns 200 and the CloudTasks page"
-    $health = Invoke-RestMethod -Uri "http://$Ip/health" -TimeoutSec 10
+    $d = $Cfg.Domain
+    $resolved = Resolve-Domain
+    if ($resolved -notcontains $Ip) {
+        throw "$d does not resolve to $Ip yet (got: $($resolved -join ', ')). Add the Cloudflare A record (tasks -> $Ip, DNS only) and wait a minute."
+    }
+    Write-Ok "$d resolves to $Ip"
+    $cert = Get-CertInfo $d
+    if (-not $cert.Valid) { throw "The certificate for $d is not valid yet (issuer: $($cert.Issuer)). Caddy may still be getting it; try again in a minute." }
+    Write-Ok ("Valid certificate for {0} from {1}, expires {2:d MMM yyyy} ({3} days left)" -f $cert.Name, $cert.Issuer, $cert.NotAfter, $cert.DaysLeft)
+    $redir = Get-HttpStatus "http://$d/health"
+    if ($redir.Code -notin 301, 308 -or $redir.Location -notlike "https://$d/*") { throw "HTTP does not redirect to HTTPS (got $($redir.Code) $($redir.Location))" }
+    Write-Ok "http://$d redirects to HTTPS ($($redir.Code))"
+    $page = Invoke-WebRequest -Uri "https://$d/login" -UseBasicParsing -TimeoutSec 10
+    if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'CloudTasks') { throw "Login page check failed ($($page.StatusCode))" }
+    Write-Ok "https://$d/login returns the sign-in page"
+    $api = Get-HttpStatus "https://$d/api/tasks"
+    if ($api.Code -ne 401) { throw "/api/tasks without a session returned $($api.Code), expected 401" }
+    Write-Ok "https://$d/api/tasks without a session -> 401"
+    $health = Invoke-RestMethod -Uri "https://$d/health" -TimeoutSec 10
     if ($health.status -ne 'ok') { throw "/health says: $($health.status)" }
-    Write-Ok "http://$Ip/health -> status=$($health.status), database=$($health.database)"
+    Write-Ok "https://$d/health -> status=$($health.status)"
 }

@@ -1,0 +1,32 @@
+# Caddy reverse proxy: the only container with published ports (80 and 443).
+# With SITE_ADDRESS set to a domain, Caddy gets a Let's Encrypt certificate automatically,
+# renews it about 30 days before expiry, and redirects HTTP to HTTPS. Locally SITE_ADDRESS is
+# http://localhost (plain HTTP, no certificate). Certificates live on the caddy_data volume.
+{
+	admin localhost:2019
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$SITE_ADDRESS:http://localhost} {
+	encode gzip
+	request_body {
+		max_size 16KB
+	}
+	header {
+		-Server
+		# 0 until HTTPS is verified; then 31536000 (1 year). No includeSubDomains, no preload.
+		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:0}"
+	}
+	reverse_proxy app:8000 {
+		# Overwrite (never append): the app trusts these only from this container's fixed IP.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+# Anything else on port 80 (e.g. http://<public-ip>/) goes to the real site address.
+:80 {
+	redir {$CANONICAL_URL:http://localhost}{uri} permanent
+}

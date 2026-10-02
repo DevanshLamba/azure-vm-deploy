@@ -1,28 +1,12 @@
-"""API tests: every test gets a fresh app with its own temporary SQLite database."""
+"""API tests: a fresh app + database per test; `client` is a signed-in user (see conftest.py)."""
 import pytest
 from fastapi.testclient import TestClient
 
 
-@pytest.fixture
-def make_client(tmp_path, monkeypatch):
-    def _make(rate_limit: int = 1000):
-        monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
-        monkeypatch.setenv("RATE_LIMIT_PER_MIN", str(rate_limit))
-        from app.main import create_app
-        return TestClient(create_app())
-    return _make
-
-
-@pytest.fixture
-def client(make_client):
-    return make_client()
-
-
-def test_health_ok(client):
+def test_health_ok_and_minimal(client):
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
-    assert r.json()["database"] == "ok"
+    assert r.json() == {"status": "ok"}  # public endpoint: no version or other details
 
 
 def test_create_and_list_task(client):
@@ -128,12 +112,13 @@ def test_info_reports_where_azure_metadata_came_from(client, monkeypatch):
     assert client.get("/api/info").json()["metadata_source"] == "imds"
 
 
-def test_rate_limit_trusts_proxy_headers_only_from_trusted_proxy(tmp_path, monkeypatch):
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "proxy.db"))
+def test_rate_limit_trusts_proxy_headers_only_from_trusted_proxy(app_env):
+    monkeypatch = app_env
     monkeypatch.setenv("RATE_LIMIT_PER_MIN", "3")
     monkeypatch.setenv("TRUSTED_PROXIES", "172.28.0.10/32")
     from app.main import create_app
 
+    # (Requests are unauthenticated: the limiter runs before auth, so allowed ones get 401.)
     # Untrusted peer (e.g. someone hitting the app directly) rotates spoofed headers: ignored,
     # all requests count against the peer's own IP, so the limit still applies.
     attacker = TestClient(create_app(), client=("203.0.113.7", 40000))
@@ -141,24 +126,25 @@ def test_rate_limit_trusts_proxy_headers_only_from_trusted_proxy(tmp_path, monke
         attacker.get("/api/tasks", headers={"X-Real-IP": f"10.9.9.{i}", "X-Forwarded-For": f"10.8.8.{i}"}).status_code
         for i in range(5)
     ]
-    assert codes == [200, 200, 200, 429, 429]
+    assert codes == [401, 401, 401, 429, 429]
 
-    # Trusted proxy (nginx's fixed address): the forwarded visitor IP is honoured, so two
+    # Trusted proxy (the reverse proxy's fixed address): the forwarded visitor IP is honoured, so two
     # visitors behind the same proxy get separate budgets...
-    nginx = TestClient(create_app(), client=("172.28.0.10", 40000))
-    alice = [nginx.get("/api/tasks", headers={"X-Real-IP": "198.51.100.1"}).status_code for _ in range(4)]
-    bob = nginx.get("/api/tasks", headers={"X-Real-IP": "198.51.100.2"}).status_code
-    assert alice == [200, 200, 200, 429]
-    assert bob == 200
-    # ...and without X-Real-IP the right-most X-Forwarded-For entry (the one nginx added) is used.
-    carol = [nginx.get("/api/tasks", headers={"X-Forwarded-For": "6.6.6.6, 198.51.100.3"}).status_code for _ in range(4)]
-    assert carol == [200, 200, 200, 429]
+    proxy = TestClient(create_app(), client=("172.28.0.10", 40000))
+    alice = [proxy.get("/api/tasks", headers={"X-Real-IP": "198.51.100.1"}).status_code for _ in range(4)]
+    bob = proxy.get("/api/tasks", headers={"X-Real-IP": "198.51.100.2"}).status_code
+    assert alice == [401, 401, 401, 429]
+    assert bob == 401
+    # ...and without X-Real-IP the right-most X-Forwarded-For entry (the one the proxy added) is used.
+    carol = [proxy.get("/api/tasks", headers={"X-Forwarded-For": "6.6.6.6, 198.51.100.3"}).status_code for _ in range(4)]
+    assert carol == [401, 401, 401, 429]
 
 
-def test_rate_limit(make_client):
-    client = make_client(rate_limit=5)
+def test_rate_limit(app_env, make_app):
+    app_env.setenv("RATE_LIMIT_PER_MIN", "5")
+    client = TestClient(make_app())
     codes = [client.get("/api/tasks").status_code for _ in range(7)]
-    assert codes[:5] == [200] * 5
+    assert codes[:5] == [401] * 5
     assert codes[5:] == [429, 429]
     assert "retry-after" in client.get("/api/tasks").headers
     assert client.get("/health").status_code == 200  # /health is not rate limited

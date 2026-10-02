@@ -99,3 +99,19 @@ class Task(BaseModel):
     done: bool
     created_at: str
     updated_at: str
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Loose limits here on purpose: real validation happens in auth.login, and every failure
+    # returns the same generic message.
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=512)
+
+
+class Me(BaseModel):
+    """What the browser learns about the signed-in user. Never includes the password hash."""
+    username: str
+    role: str
+    csrf_token: str

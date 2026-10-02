@@ -13,6 +13,6 @@ data
 id_*
 docs
 scripts
-nginx
+caddy
 docker-compose.yml
 README.md

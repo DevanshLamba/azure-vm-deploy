@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Start CloudTasks again after pause.ps1 or auto-shutdown: start the VM, wait, verify, print the URL.
+  Start CloudTasks again after pause.ps1: start the VM, wait, verify over HTTPS, print the URL.
   Also updates the SSH rule if your own public IP has changed since the last run.
 #>
 . "$PSScriptRoot\common.ps1"
@@ -25,10 +25,10 @@ if ($ruleIp -ne "$myIp/32") {
 }
 
 $ip = Get-PublicIp
-Write-Step "Waiting for the app (Docker restarts the containers on boot)"
-Wait-Http "http://$ip/health" -TimeoutSec 300 | Out-Null
+Write-Step 'Waiting for the site (Docker restarts the containers on boot)'
+Wait-Http "https://$($Cfg.Domain)/health" -TimeoutSec 300 | Out-Null
 Test-Site $ip
 
 $c = Get-CostModel
-Write-Host "`nCloudTasks is live:  http://$ip/" -ForegroundColor Green
-Write-Host ('Running costs about {0:N3} USD/day. Pause with ./scripts/pause.ps1 (auto-shutdown also runs at 02:00 IST).' -f $c.RunningDay)
+Write-Host "`nCloudTasks is live:  https://$($Cfg.Domain)/" -ForegroundColor Green
+Write-Host ('Running 24/7 costs about {0:N3} USD/day. Pause with ./scripts/pause.ps1.' -f $c.RunningDay)

@@ -1,18 +1,22 @@
-"""CloudTasks: FastAPI app serving the task API, VM status API and the single-page UI."""
+"""CloudTasks: FastAPI app serving the task API, VM status API and the single-page UI.
+
+Invite-only: every /api route needs a signed-in session (see auth.py); /health stays public.
+"""
 import os
-from datetime import date, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+
 from fastapi.staticfiles import StaticFiles
 
-from . import db, system
-from .ratelimit import RateLimitMiddleware
-from .schemas import Task, TaskCreate, TaskUpdate
+from . import auth, db, system
+from .ratelimit import RateLimitMiddleware, parse_networks
+from .samples import sample_tasks
+from .schemas import LoginRequest, Me, Task, TaskCreate, TaskUpdate
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-MAX_TASKS = int(os.environ.get("MAX_TASKS", "300"))  # public VM: cap storage growth
+MAX_TASKS = int(os.environ.get("MAX_TASKS", "300"))  # per user: caps storage growth
 NOT_NULLABLE = {"title", "priority", "color", "done"}
 
 SECURITY_HEADERS = {
@@ -28,35 +32,22 @@ SECURITY_HEADERS = {
 }
 
 
-def _sample_tasks() -> list[dict]:
-    today = date.today()
-    d = lambda days: (today + timedelta(days=days)).isoformat()  # noqa: E731
-    return [
-        {"title": "Provision the Azure VM", "note": "Ubuntu 24.04, B2pts_v2 (Arm64), SSH key only. Check the student policy for allowed regions first.", "priority": "high", "due_date": d(0)},
-        {"title": "Lock down the NSG", "note": "Port 22 only from my IP /32, port 80 open to the world.", "priority": "high", "due_date": d(1)},
-        {"title": "Write the Dockerfile", "priority": "medium", "due_date": d(2)},
-        {"title": "Set up nginx reverse proxy", "note": "App stays on the internal Docker network. Only nginx publishes port 80.", "priority": "medium"},
-        {"title": "Water the plants", "priority": "low", "due_date": d(-1)},
-        {"title": "Read about cloud-init", "note": "First-boot scripts: install Docker before I even SSH in.", "priority": "low", "due_date": d(5)},
-        {"title": "Configure auto-shutdown at 02:00 IST", "note": "Saves credits if I forget to pause the VM after a late-night session.", "priority": "medium", "due_date": d(1)},
-        {"title": "Screenshot the portal for the report", "priority": "medium", "due_date": d(4)},
-        {"title": "Buy oat milk", "note": "And maybe a croissant.", "priority": "low"},
-        {"title": "Prepare PBL viva slides", "note": "Architecture diagram, cost model, security choices, live demo, what I learned.", "priority": "high", "due_date": d(7)},
-    ]
-
-
 def create_app() -> FastAPI:
     app = FastAPI(title="CloudTasks", version=os.environ.get("APP_VERSION", "dev"),
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(RateLimitMiddleware)
+    app.state.trusted_proxies = parse_networks(os.environ.get("TRUSTED_PROXIES", ""))
+    app.state.throttle = auth.Throttle()
     db.init_db()
+    auth.reset_secret_cache()
+    auth.secret()  # create/load the session secret at start-up, not on the first login
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
         for k, v in SECURITY_HEADERS.items():
             response.headers.setdefault(k, v)
-        if request.url.path.startswith("/api/") or request.url.path == "/health":
+        if request.url.path.startswith("/api/") or request.url.path in ("/health", "/", "/login"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -65,7 +56,7 @@ def create_app() -> FastAPI:
         # Never leak stack traces or internals to the browser.
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
-    # ---- health -------------------------------------------------------------
+    # ---- health (public, minimal) --------------------------------------------
     @app.get("/health")
     def health():
         try:
@@ -73,64 +64,94 @@ def create_app() -> FastAPI:
         except Exception:
             ok = False
         if not ok:
-            return JSONResponse({"status": "error", "database": "unavailable"}, status_code=503)
-        return {"status": "ok", "database": "ok", "version": app.version}
+            return JSONResponse({"status": "error"}, status_code=503)
+        return {"status": "ok"}
 
-    # ---- tasks --------------------------------------------------------------
+    # ---- auth ------------------------------------------------------------------
+    @app.post("/api/auth/login", response_model=Me)
+    async def login(body: LoginRequest, request: Request):
+        auth.check_origin(request)  # blocks login CSRF from other sites
+        user = await auth.login(request, body.username, body.password)
+        token, csrf = auth.new_session(user["id"])
+        response = JSONResponse(Me(username=user["username"], role=user["role"], csrf_token=csrf).model_dump())
+        auth.set_session_cookie(response, token)
+        return response
+
+    @app.post("/api/auth/logout", status_code=204)
+    def logout(s: dict = Depends(auth.current_user)):
+        db.delete_session(auth.token_hash(s["token"]))
+        response = Response(status_code=204)
+        auth.clear_session_cookie(response)
+        return response
+
+    @app.get("/api/auth/me", response_model=Me)
+    def me(s: dict = Depends(auth.current_user)):
+        return Me(username=s["username"], role=s["role"], csrf_token=s["csrf_token"])
+
+    # ---- tasks (always scoped to the signed-in user) --------------------------
     @app.get("/api/tasks", response_model=list[Task])
-    def list_tasks():
-        return db.list_tasks()
+    def list_tasks(s: dict = Depends(auth.current_user)):
+        return db.list_tasks(s["user_id"])
 
     @app.post("/api/tasks", response_model=Task, status_code=201)
-    def create_task(body: TaskCreate):
-        if db.count_tasks() >= MAX_TASKS:
+    def create_task(body: TaskCreate, s: dict = Depends(auth.writer)):
+        if db.count_tasks(s["user_id"]) >= MAX_TASKS:
             raise HTTPException(409, f"Task limit reached ({MAX_TASKS}). Delete some tasks first.")
-        return db.create_task(body.model_dump(mode="json"))
+        return db.create_task(s["user_id"], body.model_dump(mode="json"))
 
     @app.patch("/api/tasks/{task_id}", response_model=Task)
-    def update_task(task_id: int, body: TaskUpdate):
+    def update_task(task_id: int, body: TaskUpdate, s: dict = Depends(auth.writer)):
         changes = body.model_dump(mode="json", exclude_unset=True)
         bad = [k for k in NOT_NULLABLE if k in changes and changes[k] is None]
         if bad:
             raise HTTPException(422, f"Field(s) cannot be null: {', '.join(sorted(bad))}")
-        task = db.update_task(task_id, changes)
+        task = db.update_task(s["user_id"], task_id, changes)
         if task is None:
             raise HTTPException(404, "Task not found")
         return task
 
     @app.post("/api/tasks/{task_id}/toggle", response_model=Task)
-    def toggle_task(task_id: int):
-        task = db.toggle_task(task_id)
+    def toggle_task(task_id: int, s: dict = Depends(auth.writer)):
+        task = db.toggle_task(s["user_id"], task_id)
         if task is None:
             raise HTTPException(404, "Task not found")
         return task
 
     @app.delete("/api/tasks/{task_id}", status_code=204)
-    def delete_task(task_id: int):
-        if not db.delete_task(task_id):
+    def delete_task(task_id: int, s: dict = Depends(auth.writer)):
+        if not db.delete_task(s["user_id"], task_id):
             raise HTTPException(404, "Task not found")
 
     @app.post("/api/tasks/sample", response_model=list[Task], status_code=201)
-    def load_sample_tasks():
-        samples = _sample_tasks()
-        if db.count_tasks() + len(samples) > MAX_TASKS:
+    def load_sample_tasks(s: dict = Depends(auth.writer)):
+        samples = sample_tasks()
+        if db.count_tasks(s["user_id"]) + len(samples) > MAX_TASKS:
             raise HTTPException(409, f"Task limit reached ({MAX_TASKS}).")
         # Oldest first, so the list (newest first) shows them in the order above.
-        return [db.create_task(TaskCreate(**s).model_dump(mode="json")) for s in reversed(samples)][::-1]
+        created = [db.create_task(s["user_id"], TaskCreate(**t).model_dump(mode="json")) for t in reversed(samples)]
+        return created[::-1]
 
-    # ---- VM status ----------------------------------------------------------
+    # ---- VM status (signed-in users only) ---------------------------------------
     @app.get("/api/metrics")
-    def metrics():
+    def metrics(s: dict = Depends(auth.current_user)):
         return system.metrics()
 
     @app.get("/api/info")
-    def info():
+    def info(s: dict = Depends(auth.current_user)):
         return system.info()
 
-    # ---- UI -----------------------------------------------------------------
+    # ---- pages ------------------------------------------------------------------
     @app.get("/", include_in_schema=False)
-    def index():
+    def index(request: Request):
+        if not auth.session_from_request(request):
+            return RedirectResponse("/login", status_code=303)
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/login", include_in_schema=False)
+    def login_page(request: Request):
+        if auth.session_from_request(request):
+            return RedirectResponse("/", status_code=303)
+        return FileResponse(STATIC_DIR / "login.html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

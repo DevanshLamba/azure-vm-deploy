@@ -1,6 +1,8 @@
 #cloud-config
 # First-boot setup for the CloudTasks VM (Ubuntu 24.04). deploy.ps1 fills in the __PLACEHOLDERS__.
-# Installs Docker from Docker's official apt repo, clones the public repo and starts the stack.
+# Installs Docker from Docker's official apt repo, clones the public repo and starts the stack
+# (Caddy with automatic HTTPS in front of the app). The app generates its session secret on
+# first start inside its data volume; it never leaves the VM.
 package_update: true
 package_upgrade: false
 packages:
@@ -21,6 +23,11 @@ write_files:
       AZURE_VM_SIZE=__VM_SIZE__
       AZURE_VM_NAME=__VM_NAME__
       AZURE_PUBLIC_IP=__PUBLIC_IP__
+      # HTTPS: Caddy gets a Let's Encrypt certificate for this name (DNS must point here).
+      SITE_ADDRESS=__DOMAIN__
+      CANONICAL_URL=https://__DOMAIN__
+      # HSTS stays off (0) until HTTPS is verified; update.ps1 -EnableHsts sets 31536000.
+      HSTS_MAX_AGE=0
       APP_VERSION=1.0.0
 
 runcmd:

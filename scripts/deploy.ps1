@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-  Deploy CloudTasks to a new Ubuntu 24.04 VM on Azure (IaaS), behind nginx on port 80.
+  Deploy CloudTasks to a new Ubuntu 24.04 VM on Azure (IaaS), behind Caddy with automatic HTTPS.
 
 .DESCRIPTION
-  1. Checks login, the student "allowed regions" policy, auto-shutdown support and VM size availability.
+  1. Checks login, the student "allowed regions" policy and VM size availability.
   2. Shows the planned resources and their cost per day, then waits for you to type "yes".
-  3. Creates: resource group, static public IP, NSG (SSH only from your IP /32, HTTP open),
-     VNet/subnet, the VM (SSH key only) with cloud-init (installs Docker, clones the repo,
-     runs docker compose up -d), and auto-shutdown at 02:00 IST.
-  4. Verifies http://<ip>/ and /health from this laptop and prints the URL.
+  3. Creates: resource group, static public IP, NSG (SSH only from your IP /32, HTTP + HTTPS open),
+     VNet/subnet and the VM (SSH key only) with cloud-init (installs Docker, clones the repo,
+     runs docker compose up -d). The VM runs 24/7 (no auto-shutdown).
+  4. Waits for the Cloudflare A record (the domain -> the new IP, "DNS only"), then verifies
+     HTTPS, the HTTP redirect, the login wall and /health from this laptop.
 
 .EXAMPLE
   ./scripts/deploy.ps1             # interactive: shows the plan, asks for "yes"
@@ -43,14 +44,7 @@ if ($allowed.Count -gt 0) {
     Write-Info 'No allowed-regions policy found (no restriction).'
 }
 
-Write-Step 'Checking that auto-shutdown works in this region'
 $regionName = Invoke-Az account list-locations --query "[?name=='$($Cfg.Region)'].displayName | [0]" -o tsv
-$shutdownRegions = Invoke-Az provider show -n Microsoft.DevTestLab `
-    --query "resourceTypes[?resourceType=='schedules'].locations | [0]" -o tsv
-if (@($shutdownRegions -split "`t|`r?`n") -notcontains $regionName) {
-    throw "Auto-shutdown (Microsoft.DevTestLab/schedules) is not available in $regionName."
-}
-Write-Ok "Auto-shutdown is supported in $regionName"
 
 Write-Step "Checking that $($Cfg.VmSize) is available to this subscription in $($Cfg.Region)"
 # az rest fills in {subscriptionId} itself, so the ID is never printed.
@@ -79,15 +73,14 @@ $plan = @(
     [pscustomobject]@{ Resource = 'Virtual machine'; Name = $Cfg.VmName;      Details = "$($Cfg.VmSize), Ubuntu 24.04 Arm64, SSH key only";          'USD/day' = '{0:N3}' -f $cost.VmDay }
     [pscustomobject]@{ Resource = 'OS disk';        Name = "$($Cfg.VmName)-osdisk"; Details = "$($Cfg.OsDiskSku) $($Cfg.OsDiskGb) GB (E4)";          'USD/day' = '{0:N3}' -f $cost.DiskDay }
     [pscustomobject]@{ Resource = 'Public IP';      Name = $Cfg.PublicIpName; Details = 'Standard SKU, static IPv4';                                'USD/day' = '{0:N3}' -f $cost.IpDay }
-    [pscustomobject]@{ Resource = 'NSG';            Name = $Cfg.NsgName;      Details = "22 from $myIp/32, 80 from anywhere, rest denied";            'USD/day' = '0' }
+    [pscustomobject]@{ Resource = 'NSG';            Name = $Cfg.NsgName;      Details = "22 from $myIp/32, 80 + 443 from anywhere, rest denied";      'USD/day' = '0' }
     [pscustomobject]@{ Resource = 'VNet + subnet';  Name = $Cfg.VnetName;     Details = '10.20.0.0/24, subnet 10.20.0.0/26';                          'USD/day' = '0' }
     [pscustomobject]@{ Resource = 'NIC';            Name = "$($Cfg.VmName)VMNic"; Details = 'attached to VM, NSG and public IP';                     'USD/day' = '0' }
-    [pscustomobject]@{ Resource = 'Auto-shutdown';  Name = "shutdown-computevm-$($Cfg.VmName)"; Details = '02:00 IST (20:30 UTC) every day';       'USD/day' = '0' }
 )
 $plan | Format-Table -AutoSize | Out-String | Write-Host
 Show-CostTable $cost
 Write-Host ("`nPrices: VM {0} USD/h, public IP {1} USD/h, disk {2} USD/month. Billed to your Azure for Students credit (no card)." -f $cost.VmHour, $cost.IpHour, $cost.DiskMonth)
-Write-Host 'Outbound data: first 100 GB/month free. Auto-shutdown deallocates the VM at 02:00 IST, so the VM part stops being billed overnight.'
+Write-Host 'Outbound data: first 100 GB/month free. The VM runs 24/7; pause.ps1 stops the VM part of the bill.'
 
 if ($PlanOnly) { Write-Host "`nPlan only: nothing was created." -ForegroundColor Yellow; return }
 
@@ -127,7 +120,10 @@ Invoke-Az network nsg rule create -g $Cfg.ResourceGroup --nsg-name $Cfg.NsgName 
 Invoke-Az network nsg rule create -g $Cfg.ResourceGroup --nsg-name $Cfg.NsgName -n AllowHttp `
     --priority 110 --direction Inbound --access Allow --protocol Tcp `
     --source-address-prefixes Internet --destination-port-ranges 80 -o none
-Write-Ok "NSG: 22 from $myIp/32, 80 from Internet (everything else denied by default)"
+Invoke-Az network nsg rule create -g $Cfg.ResourceGroup --nsg-name $Cfg.NsgName -n AllowHttps `
+    --priority 120 --direction Inbound --access Allow --protocol Tcp `
+    --source-address-prefixes Internet --destination-port-ranges 443 -o none
+Write-Ok "NSG: 22 from $myIp/32, 80 + 443 from Internet (everything else denied by default)"
 
 Write-Step 'Creating virtual network'
 Invoke-Az network vnet create -g $Cfg.ResourceGroup -n $Cfg.VnetName --address-prefix 10.20.0.0/24 `
@@ -141,6 +137,7 @@ $cloudInit = (Get-Content "$PSScriptRoot\cloud-init.yaml" -Raw).
     Replace('__VM_NAME__', $Cfg.VmName).
     Replace('__PUBLIC_IP__', $ip).
     Replace('__ADMIN_USER__', $Cfg.AdminUser).
+    Replace('__DOMAIN__', $Cfg.Domain).
     Replace('__REPO_URL__', $Cfg.RepoUrl)
 $cloudInitFile = Join-Path ([IO.Path]::GetTempPath()) 'cloudtasks-cloud-init.yaml'
 [IO.File]::WriteAllText($cloudInitFile, ($cloudInit -replace "`r`n", "`n"))
@@ -158,26 +155,24 @@ Invoke-Az vm create -g $Cfg.ResourceGroup -n $Cfg.VmName -l $Cfg.Region `
 Remove-Item $cloudInitFile -ErrorAction SilentlyContinue
 Write-Ok 'VM created'
 
-Write-Step 'Enabling auto-shutdown at 02:00 IST (20:30 UTC)'
-Invoke-Az vm auto-shutdown -g $Cfg.ResourceGroup -n $Cfg.VmName --time $Cfg.ShutdownUtc -o none
-Write-Ok 'Auto-shutdown scheduled daily'
-
 # ---------------------------------------------------------------- 4. verify
-Write-Step "Waiting for cloud-init to install Docker and start the app (usually 3-6 minutes)"
+Write-Host "`nNow add (or update) the DNS record in Cloudflare: A  tasks  ->  $ip  (Proxy status: DNS only)" -ForegroundColor Yellow
+Write-Step "Waiting for DNS + cloud-init (Docker install, image build, HTTPS certificate): usually 4-8 minutes"
 try {
-    Wait-Http "http://$ip/health" -TimeoutSec 900 | Out-Null
+    Wait-Http "https://$($Cfg.Domain)/health" -TimeoutSec 1500 | Out-Null
 } catch {
-    Write-Host 'The app did not come up in time. Last lines of the cloud-init log:' -ForegroundColor Red
-    & ssh -i $Cfg.SshKey -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts_cloudtasks" `
-        "$($Cfg.AdminUser)@$ip" 'sudo tail -n 40 /var/log/cloud-init-output.log'
+    Write-Host 'The site did not come up in time. Last lines of the cloud-init log:' -ForegroundColor Red
+    Invoke-Vm $ip 'sudo tail -n 40 /var/log/cloud-init-output.log'
     throw
 }
 Test-Site $ip
 
 Write-Step 'Checking the containers over SSH'
-& ssh -i $Cfg.SshKey -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts_cloudtasks" `
-    "$($Cfg.AdminUser)@$ip" "cloud-init status; sudo docker compose -f /opt/cloudtasks/docker-compose.yml ps --format 'table {{.Name}}\t{{.Status}}'"
+Invoke-Vm $ip 'cloud-init status; sudo docker compose -f /opt/cloudtasks/docker-compose.yml ps'
 
-Write-Host "`nCloudTasks is live:  http://$ip/" -ForegroundColor Green
+Write-Host "`nCloudTasks is live:  https://$($Cfg.Domain)/" -ForegroundColor Green
 Write-Host "SSH:                 ssh -i $($Cfg.SshKey) $($Cfg.AdminUser)@$ip"
-Write-Host 'Pause (stop paying for the VM):  ./scripts/pause.ps1'
+Write-Host 'Next: create accounts (you type the passwords), then enable HSTS:'
+Write-Host '  ssh in, then: cd /opt/cloudtasks && sudo docker compose exec -it app python -m app.manage_users create <name> --role admin'
+Write-Host '  ./scripts/update.ps1 -EnableHsts'
+Write-Host 'Status any time: ./scripts/status.ps1    Pause: ./scripts/pause.ps1'
