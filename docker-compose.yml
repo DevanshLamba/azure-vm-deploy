@@ -1,4 +1,4 @@
-# CloudTasks: nginx (public, port 80) -> app (internal network only) -> SQLite on a named volume.
+# CloudTasks: Caddy (public, ports 80/443, automatic HTTPS) -> app (internal network only) -> SQLite volume.
 name: cloudtasks
 
 services:
@@ -21,11 +21,17 @@ services:
       DEPLOY_TIME: ${DEPLOY_TIME:-}
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-300}
       MAX_TASKS: ${MAX_TASKS:-300}
-      TRUSTED_PROXIES: 172.28.0.10/32     # only nginx may set X-Real-IP / X-Forwarded-For
+      TRUSTED_PROXIES: 172.28.0.10/32     # only Caddy may set X-Real-IP / X-Forwarded-For
+      COOKIE_SECURE: ${COOKIE_SECURE:-1}  # session cookie only over HTTPS (localhost is exempt in browsers)
+      # The session secret is generated on first start into /data/.session_secret (mode 0600),
+      # unless SESSION_SECRET is set in the VM's .env. It is never in git.
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      DEMO_RATE_LIMIT_PER_MIN: ${DEMO_RATE_LIMIT_PER_MIN:-60}
       # Filled from the Azure metadata service on the VM host by the deploy script (not secrets).
       AZURE_REGION: ${AZURE_REGION:-}
       AZURE_VM_SIZE: ${AZURE_VM_SIZE:-}
       AZURE_VM_NAME: ${AZURE_VM_NAME:-}
+      HOST_NAME: ${HOST_NAME:-}              # the VM's hostname (the container's own is its ID)
       AZURE_PUBLIC_IP: ${AZURE_PUBLIC_IP:-}
     networks:
       - backend                           # no ports published: unreachable from outside
@@ -39,47 +45,54 @@ services:
       driver: json-file
       options: { max-size: "5m", max-file: "3" }
 
-  nginx:
-    image: nginx:1.30-alpine
-    container_name: cloudtasks-nginx
+  caddy:
+    image: caddy:2.11-alpine
+    container_name: cloudtasks-caddy
     restart: always
     depends_on:
       app:
         condition: service_healthy
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-http://localhost}   # on the VM: tasks.devanshlamba.in
+      CANONICAL_URL: ${CANONICAL_URL:-http://localhost} # where http://<ip>/ redirects to
+      HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}                  # set to 31536000 once HTTPS is verified
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data                  # certificates + ACME account: keep across rebuilds
+      - caddy_config:/config
     read_only: true
     tmpfs:
-      - /var/cache/nginx:size=16m
-      - /var/run:size=1m
       - /tmp:size=8m
     networks:
       frontend: {}
       backend:
         ipv4_address: 172.28.0.10         # fixed, so the app can trust exactly this address
-    mem_limit: 64m
+    mem_limit: 96m
     cpus: 0.5
     pids_limit: 50
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]   # bind :80 and drop to the nginx user
+    cap_add: [NET_BIND_SERVICE]           # bind :80 and :443
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 3s
       retries: 3
     logging: *logging
 
 networks:
-  frontend: {}                            # nginx <-> outside world
+  frontend: {}                            # Caddy <-> outside world
   backend:
-    internal: true                        # app <-> nginx only, no route to the internet
+    internal: true                        # app <-> Caddy only, no route to the internet
     ipam:
       config:
         - subnet: 172.28.0.0/24
 
 volumes:
   taskdata: {}
+  caddy_data: {}
+  caddy_config: {}

@@ -18,8 +18,11 @@ const PRIORITY_LABEL = { high: "High", medium: "Medium", low: "Low" };
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
 
 /* ================================================================ API */
+let csrfToken = "";
+
 async function api(path, { method = "GET", body } = {}) {
   const opts = { method, headers: { Accept: "application/json" } };
+  if (method !== "GET") opts.headers["X-CSRF-Token"] = csrfToken; // checked by the server on every write
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -29,6 +32,10 @@ async function api(path, { method = "GET", body } = {}) {
     res = await fetch(path, opts);
   } catch {
     throw new Error("Can't reach the server. Check your connection and try again.");
+  }
+  if (res.status === 401) {
+    location.replace("/login"); // session expired or signed out elsewhere
+    throw new Error("Please sign in again.");
   }
   if (res.status === 204) return null;
   let data = null;
@@ -216,7 +223,18 @@ const state = {
   loaded: false,
   error: null,
   view: "tasks",
+  user: null,
 };
+
+const DEMO_MESSAGE = "Demo account is read-only. Ask Devansh for an invite to add your own tasks.";
+const isReadOnly = () => state.user?.role === "demo";
+
+/** Returns true (and explains why) when the signed-in account may not change anything. */
+function blockedForDemo() {
+  if (!isReadOnly()) return false;
+  toast(DEMO_MESSAGE, { tone: "error" });
+  return true;
+}
 
 const cells = new Map(); // task id -> .cell element
 // Layout always uses the logical order, never DOM order (DOM order is column-major after a layout).
@@ -264,7 +282,10 @@ function fillCard(cell, t) {
   $(".card-meta", card).textContent = t.done ? `Done ${relTime(t.updated_at)}` : `Added ${relTime(t.created_at)}`;
   const check = $(".check", card);
   check.setAttribute("aria-checked", String(t.done));
-  check.setAttribute("aria-label", `Mark "${t.title}" as ${t.done ? "not done" : "done"}`);
+  check.setAttribute("aria-label", isReadOnly()
+    ? `"${t.title}" is ${t.done ? "done" : "not done"} (read-only demo)`
+    : `Mark "${t.title}" as ${t.done ? "not done" : "done"}`);
+  check.setAttribute("aria-disabled", String(isReadOnly()));
   $('[data-action="edit"]', card).setAttribute("aria-label", `Edit "${t.title}"`);
   $('[data-action="delete"]', card).setAttribute("aria-label", `Delete "${t.title}"`);
 }
@@ -427,6 +448,7 @@ async function loadTasks() {
 }
 
 async function toggleTask(id) {
+  if (blockedForDemo()) return;
   const t = byId(id);
   if (!t) return;
   const cell = cells.get(id);
@@ -453,6 +475,7 @@ async function toggleTask(id) {
 }
 
 async function deleteTask(id) {
+  if (blockedForDemo()) return;
   const t = byId(id);
   if (!t) return;
   state.tasks = state.tasks.filter((x) => x.id !== id);
@@ -484,6 +507,7 @@ async function restoreTask(t) {
 }
 
 async function loadSamples(btn) {
+  if (blockedForDemo()) return;
   if (btn) btn.disabled = true;
   try {
     const added = await api("/api/tasks/sample", { method: "POST" });
@@ -510,7 +534,7 @@ let editing = null;
 let lastFocus = null;
 
 function openComposer(task = null) {
-  if (els.composer.open) return;
+  if (els.composer.open || blockedForDemo()) return;
   setView("tasks");
   editing = task;
   lastFocus = document.activeElement;
@@ -650,6 +674,9 @@ function toast(message, { tone = "ok", action } = {}) {
     btn.addEventListener("click", () => { dismiss(); action.fn(); });
     el.append(btn);
   }
+  // The same message twice in a row (e.g. a click and a key press) replaces the earlier one.
+  for (const old of els.toasts.children) if (old.dataset.msg === message) old.remove();
+  el.dataset.msg = message;
   els.toasts.append(el);
   while (els.toasts.children.length > 3) els.toasts.firstElementChild.remove();
   timer = setTimeout(dismiss, action ? 6000 : 3200);
@@ -918,19 +945,27 @@ async function loadInfo() {
 
     const rows = [
       ["Hostname", i.hostname],
-      i.vm_name && ["VM", i.vm_name],
+      // Only list the VM separately if it differs from the hostname (avoids showing it twice).
+      i.vm_name && i.vm_name !== i.hostname && ["VM", i.vm_name],
       ["OS", i.os],
-      ["Container", i.container || "not containerised"],
+      ["Container", i.container || "not containerised", i.container_id],
       ["Python", i.python],
       ["Deployed", `${new Date(i.deployed_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} (${relTime(i.deployed_at)})`],
     ].filter(Boolean);
     const kv = $("#host-kv");
-    kv.replaceChildren(...rows.map(([k, v]) => {
+    kv.replaceChildren(...rows.map(([k, v, small]) => {
       const row = document.createElement("div");
       const dt = document.createElement("dt");
       const dd = document.createElement("dd");
       dt.textContent = k;
       dd.textContent = v;
+      if (small) {
+        const id = document.createElement("small");
+        id.className = "kv-sub";
+        id.textContent = small;
+        id.title = "Container ID";
+        dd.append(id);
+      }
       row.append(dt, dd);
       return row;
     }));
@@ -1082,9 +1117,42 @@ function bindEvents() {
   });
 }
 
+/* ================================================================ signed-in user */
+async function loadMe() {
+  try {
+    const me = await api("/api/auth/me");
+    state.user = me;
+    csrfToken = me.csrf_token;
+  } catch (err) {
+    els.summary.textContent = err.message;
+    return false;
+  }
+  const { username, role } = state.user;
+  $("#user-avatar").textContent = username.slice(0, 1).toUpperCase();
+  $("#user-name").textContent = username;
+  const badge = $("#role-badge");
+  badge.hidden = role === "user";
+  badge.textContent = role === "demo" ? "Demo" : "Admin";
+  $("#user-chip").hidden = false;
+  document.documentElement.dataset.readonly = String(isReadOnly());
+  $("#demo-pill").hidden = !isReadOnly();
+  moveGlider();
+  return true;
+}
+
+async function logout() {
+  const btn = $("#logout");
+  btn.disabled = true;
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch { /* already signed out: the redirect below is still right */ }
+  location.replace("/login");
+}
+
 /* ================================================================ boot */
 applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
 greet();
 bindEvents();
+$("#logout").addEventListener("click", logout);
 setView(location.hash.slice(1) || "tasks");
-loadTasks();
+loadMe().then((ok) => { if (ok) loadTasks(); });

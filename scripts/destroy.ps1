@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Delete everything: the whole resource group (VM, disk, IP, NSG, VNet, auto-shutdown). Cost afterwards: 0.
+  Delete everything: the whole resource group (VM, disk, IP, NSG, VNet). Cost afterwards: 0.
   Asks you to type the resource group name to confirm. Your tasks are deleted with the disk.
 #>
 param([switch]$AssumeYes)   # skip the prompt: only when you're sure
