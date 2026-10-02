@@ -26,6 +26,7 @@ services:
       AZURE_REGION: ${AZURE_REGION:-}
       AZURE_VM_SIZE: ${AZURE_VM_SIZE:-}
       AZURE_VM_NAME: ${AZURE_VM_NAME:-}
+      HOST_NAME: ${HOST_NAME:-}              # the VM's hostname (the container's own is its ID)
       AZURE_PUBLIC_IP: ${AZURE_PUBLIC_IP:-}
     networks:
       - backend                           # no ports published: unreachable from outside

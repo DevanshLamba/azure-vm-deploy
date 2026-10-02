@@ -72,6 +72,13 @@ def _imds() -> dict | None:
     return _imds_cache
 
 
+def host_name(imds: dict) -> str:
+    """The VM's name: IMDS first (cached, 1 s timeout), then HOST_NAME (written to .env by the
+    deploy script on the VM, because the app container has no route to IMDS), then the
+    container's own hostname as a last resort."""
+    return imds.get("vm_name") or os.environ.get("HOST_NAME") or socket.gethostname()
+
+
 def info() -> dict:
     imds = _imds() or {}
     # The app container sits on an internal-only Docker network (no egress), so IMDS is
@@ -92,8 +99,10 @@ def info() -> dict:
         "version": os.environ.get("APP_VERSION", "dev"),
         "os": f"{platform.system()} {platform.release()}",
         "python": platform.python_version(),
-        "hostname": socket.gethostname(),
+        "hostname": host_name(imds),
         "container": os.environ.get("CONTAINER_NAME") or None,
+        # Inside Docker, the container's hostname is its short container ID.
+        "container_id": socket.gethostname() if os.environ.get("CONTAINER_NAME") else None,
         "on_azure": bool(azure),
         "region": azure.get("region"),
         "vm_size": azure.get("vm_size"),

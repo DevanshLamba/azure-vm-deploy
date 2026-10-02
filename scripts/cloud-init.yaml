@@ -35,5 +35,6 @@ runcmd:
   - git clone --depth 1 __REPO_URL__ /opt/cloudtasks
   - cp /etc/cloudtasks.env /opt/cloudtasks/.env
   - echo "DEPLOY_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /opt/cloudtasks/.env
+  - echo "HOST_NAME=$(hostname)" >> /opt/cloudtasks/.env
   - cd /opt/cloudtasks && docker compose up -d --build
   - echo "CloudTasks deployed" > /var/log/cloudtasks-deployed

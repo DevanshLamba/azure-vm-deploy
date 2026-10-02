@@ -918,19 +918,27 @@ async function loadInfo() {
 
     const rows = [
       ["Hostname", i.hostname],
-      i.vm_name && ["VM", i.vm_name],
+      // Only list the VM separately if it differs from the hostname (avoids showing it twice).
+      i.vm_name && i.vm_name !== i.hostname && ["VM", i.vm_name],
       ["OS", i.os],
-      ["Container", i.container || "not containerised"],
+      ["Container", i.container || "not containerised", i.container_id],
       ["Python", i.python],
       ["Deployed", `${new Date(i.deployed_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} (${relTime(i.deployed_at)})`],
     ].filter(Boolean);
     const kv = $("#host-kv");
-    kv.replaceChildren(...rows.map(([k, v]) => {
+    kv.replaceChildren(...rows.map(([k, v, small]) => {
       const row = document.createElement("div");
       const dt = document.createElement("dt");
       const dd = document.createElement("dd");
       dt.textContent = k;
       dd.textContent = v;
+      if (small) {
+        const id = document.createElement("small");
+        id.className = "kv-sub";
+        id.textContent = small;
+        id.title = "Container ID";
+        dd.append(id);
+      }
       row.append(dt, dd);
       return row;
     }));

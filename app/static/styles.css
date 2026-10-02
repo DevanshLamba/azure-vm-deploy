@@ -611,6 +611,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 8px clamp(16px, 4vw, 40px) 12
 .kv div:last-child { border-bottom: 0; }
 .kv dt { font-size: .86rem; font-weight: 700; color: var(--ink-2); }
 .kv dd { margin: 0; font-weight: 800; font-size: .9rem; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.kv-sub { display: block; margin-top: 2px; font: 700 .74rem/1.2 var(--font-mono); color: var(--ink-2); letter-spacing: .02em; }
 
 .tiles[aria-busy="true"] .tile > :not(.tile-head) { opacity: .35; filter: blur(1px); }
 .tiles .tile > * { transition: opacity .5s, filter .5s; }
