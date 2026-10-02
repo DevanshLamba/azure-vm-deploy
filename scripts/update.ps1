@@ -12,7 +12,7 @@ $ip = Get-PublicIp
 
 Write-Step "Pulling the latest code and rebuilding on $ip"
 & ssh -i $Cfg.SshKey -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts_cloudtasks" `
-    "$($Cfg.AdminUser)@$ip" 'cd /opt/cloudtasks && sudo git pull --ff-only && sudo git log -1 --format="deployed commit: %h %s" && sudo docker compose up -d --build 2>&1 | tail -n 4'
+    "$($Cfg.AdminUser)@$ip" 'cd /opt/cloudtasks && sudo git pull --ff-only && sudo git log -1 --oneline && sudo docker compose up -d --build 2>&1 | tail -n 4'
 if ($LASTEXITCODE -ne 0) { throw 'Update over SSH failed.' }
 
 Write-Step 'Verifying'
