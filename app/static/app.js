@@ -887,6 +887,10 @@ async function loadInfo() {
     const i = await api("/api/info");
     infoLoaded = true;
     const regionName = i.region ? REGION_NAMES[i.region] || i.region : null;
+    // Be honest about where the Azure values came from (the app container has no internet access).
+    const sourceText = i.metadata_source === "imds"
+      ? "From the Azure instance metadata service"
+      : "Set at deploy time from Azure";
 
     $("#app-version").textContent = `v${i.version}`;
     $("#status-sub").textContent = i.on_azure
@@ -894,13 +898,13 @@ async function loadInfo() {
       : `Live numbers from ${i.hostname}`;
 
     $("#region-val").textContent = regionName || "Local machine";
-    $("#region-detail").textContent = i.region ? `${i.region} · Microsoft Azure` : "Not on Azure: no instance metadata";
+    $("#region-detail").textContent = i.region ? `${i.region} · Microsoft Azure` : "Not on Azure: no Azure metadata";
     $("#vm-size").textContent = i.vm_size ? i.vm_size.replace("Standard_", "") : "local";
 
     const ipBtn = $("#ip-copy");
     if (i.public_ip) {
       $("#ip-val").textContent = i.public_ip;
-      $("#ip-detail").textContent = "From the Azure instance metadata service";
+      $("#ip-detail").textContent = sourceText;
       ipBtn.hidden = false;
       ipBtn.onclick = async () => {
         try { await navigator.clipboard.writeText(i.public_ip); toast("IP address copied"); }

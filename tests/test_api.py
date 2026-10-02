@@ -110,6 +110,24 @@ def test_metrics_and_info(client):
     assert "subscriptionId" not in str(i)
 
 
+def test_info_reports_where_azure_metadata_came_from(client, monkeypatch):
+    from app import system
+    monkeypatch.setattr(system, "_imds", lambda: None)  # app has no egress: IMDS unreachable
+
+    local = client.get("/api/info").json()
+    assert local["metadata_source"] is None and local["on_azure"] is False
+
+    for key, value in {"REGION": "eastasia", "VM_SIZE": "Standard_B2pts_v2",
+                       "VM_NAME": "vm-cloudtasks", "PUBLIC_IP": "203.0.113.10"}.items():
+        monkeypatch.setenv(f"AZURE_{key}", value)
+    deployed = client.get("/api/info").json()
+    assert deployed["metadata_source"] == "deploy"
+    assert (deployed["region"], deployed["public_ip"]) == ("eastasia", "203.0.113.10")
+
+    monkeypatch.setattr(system, "_imds", lambda: {"region": "eastasia", "public_ip": None})
+    assert client.get("/api/info").json()["metadata_source"] == "imds"
+
+
 def test_rate_limit_trusts_proxy_headers_only_from_trusted_proxy(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "proxy.db"))
     monkeypatch.setenv("RATE_LIMIT_PER_MIN", "3")

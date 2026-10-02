@@ -73,12 +73,19 @@ def _imds() -> dict | None:
 
 
 def info() -> dict:
-    azure = _imds() or {}
-    # The app container sits on an internal-only Docker network (no egress), so IMDS is usually
-    # unreachable from inside it. The deploy script reads IMDS on the VM host and passes these
-    # non-secret values in as environment variables instead.
+    imds = _imds() or {}
+    # The app container sits on an internal-only Docker network (no egress), so IMDS is
+    # unreachable from inside it. The deploy script passes these non-secret values in as
+    # environment variables instead. metadata_source says honestly where they came from.
+    azure = {}
     for key in ("region", "vm_size", "vm_name", "public_ip"):
-        azure[key] = azure.get(key) or os.environ.get(f"AZURE_{key.upper()}") or None
+        azure[key] = imds.get(key) or os.environ.get(f"AZURE_{key.upper()}") or None
+    if imds:
+        source = "imds"
+    elif any(azure.values()):
+        source = "deploy"
+    else:
+        source = None
     azure = {k: v for k, v in azure.items() if v}
     return {
         "app": "CloudTasks",
@@ -92,6 +99,7 @@ def info() -> dict:
         "vm_size": azure.get("vm_size"),
         "vm_name": azure.get("vm_name"),
         "public_ip": azure.get("public_ip"),
+        "metadata_source": source,
         "deployed_at": os.environ.get("DEPLOY_TIME") or STARTED_AT,
         "started_at": STARTED_AT,
     }

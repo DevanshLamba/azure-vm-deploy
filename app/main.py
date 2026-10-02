@@ -32,7 +32,7 @@ def _sample_tasks() -> list[dict]:
     today = date.today()
     d = lambda days: (today + timedelta(days=days)).isoformat()  # noqa: E731
     return [
-        {"title": "Provision the Azure VM", "note": "Ubuntu 24.04, B1s, SSH key only. Check the student policy for allowed regions first.", "priority": "high", "due_date": d(0)},
+        {"title": "Provision the Azure VM", "note": "Ubuntu 24.04, B2pts_v2 (Arm64), SSH key only. Check the student policy for allowed regions first.", "priority": "high", "due_date": d(0)},
         {"title": "Lock down the NSG", "note": "Port 22 only from my IP /32, port 80 open to the world.", "priority": "high", "due_date": d(1)},
         {"title": "Write the Dockerfile", "priority": "medium", "due_date": d(2)},
         {"title": "Set up nginx reverse proxy", "note": "App stays on the internal Docker network. Only nginx publishes port 80.", "priority": "medium"},
